@@ -2354,11 +2354,58 @@ it("uses default CORS settings when cors: true", async () => {
   });
 
   expect(response.status).toBe(204);
-  expect(response.headers.get("Access-Control-Allow-Origin")).toBe("*");
+  // The default pairs `credentials: true` with a wildcard origin, which the
+  // Fetch Standard forbids for credentialed requests - so the wildcard is
+  // reflected as the actual request origin instead of the literal "*". See
+  // the dedicated test below for the invariant this maintains.
+  expect(response.headers.get("Access-Control-Allow-Origin")).toBe(
+    "https://example.com",
+  );
   expect(response.headers.get("Access-Control-Allow-Headers")).toBe(
     "Content-Type, Authorization, Accept, Mcp-Session-Id, Mcp-Protocol-Version, Last-Event-Id, Mcp-Method, Mcp-Name",
   );
   expect(response.headers.get("Access-Control-Allow-Credentials")).toBe("true");
+
+  await httpServer.close();
+});
+
+it("never combines wildcard origin with credentials: true (Fetch Standard forbids it)", async () => {
+  const port = await getRandomPort();
+
+  const httpServer = await startHTTPServer({
+    // No `cors` option passed at all - the actual default path, not `cors: true`.
+    createServer: async () => {
+      const mcpServer = new Server(
+        { name: "test", version: "1.0.0" },
+        { capabilities: {} },
+      );
+      return mcpServer;
+    },
+    port,
+  });
+
+  const response = await fetch(`http://localhost:${port}/mcp`, {
+    headers: {
+      "Access-Control-Request-Method": "POST",
+      Origin: "https://example.com",
+    },
+    method: "OPTIONS",
+  });
+
+  expect(response.status).toBe(204);
+
+  const allowOrigin = response.headers.get("Access-Control-Allow-Origin");
+  const allowCredentials = response.headers.get(
+    "Access-Control-Allow-Credentials",
+  );
+
+  // https://fetch.spec.whatwg.org/#http-access-control-allow-credentials -
+  // a browser rejects the whole CORS response if these two ever appear
+  // together, silently failing any credentialed request.
+  if (allowCredentials === "true") {
+    expect(allowOrigin).not.toBe("*");
+    expect(allowOrigin).toBe("https://example.com");
+  }
 
   await httpServer.close();
 });

@@ -615,8 +615,21 @@ const applyCorsHeaders = (
       }
     }
 
+    // A wildcard `Access-Control-Allow-Origin` combined with
+    // `Access-Control-Allow-Credentials: true` is forbidden by the Fetch
+    // Standard (https://fetch.spec.whatwg.org/#http-access-control-allow-credentials)
+    // - a browser rejects the whole CORS response for any credentialed
+    // request, silently, before it ever reaches the MCP handler. Reflecting
+    // the actual request `Origin` instead of the literal `"*"` is the
+    // standard workaround (see the `cors` npm package), and is safe here
+    // because it only changes the value emitted, not which origins pass.
+    if (allowedOrigin === "*" && finalCorsOptions.credentials === true) {
+      allowedOrigin = origin.origin;
+    }
+
     if (allowedOrigin !== "false") {
       res.setHeader("Access-Control-Allow-Origin", allowedOrigin);
+      res.setHeader("Vary", "Origin");
     }
 
     // Handle credentials
