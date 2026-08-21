@@ -1,9 +1,9 @@
+import * as nodeTransportModule from "@modelcontextprotocol/node";
 import { Server } from "@modelcontextprotocol/server";
 import { getRandomPort } from "get-port-please";
 import { setTimeout as delay } from "node:timers/promises";
 import { expect, it, vi } from "vitest";
 
-import * as nodeTransportModule from "@modelcontextprotocol/node";
 import { startHTTPServer } from "./startHTTPServer.js";
 
 // Regression: the POST branch of handleStreamRequest called res.writeHead(...) in
@@ -26,7 +26,11 @@ it("does not crash when the stream POST error path runs after headers are sent",
   // mid-stream failure.
   const handleRequestSpy = vi
     .spyOn(nodeTransportModule.NodeStreamableHTTPServerTransport.prototype, "handleRequest")
-    .mockImplementation(async function (this: unknown, _req: unknown, res: any) {
+    .mockImplementation(async function (
+        this: unknown,
+        _req: unknown,
+        res: import("node:http").ServerResponse,
+      ) {
       res.writeHead(200, { "content-type": "text/event-stream" });
       res.write(": open\n\n");
       throw new Error("simulated mid-stream failure after headers");
