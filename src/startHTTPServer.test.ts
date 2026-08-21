@@ -2354,22 +2354,18 @@ it("uses default CORS settings when cors: true", async () => {
   });
 
   expect(response.status).toBe(204);
-  // The default pairs `credentials: true` with a wildcard origin, which the
-  // Fetch Standard forbids for credentialed requests - so the wildcard is
-  // reflected as the actual request origin instead of the literal "*". See
-  // the dedicated test below for the invariant this maintains.
-  expect(response.headers.get("Access-Control-Allow-Origin")).toBe(
-    "https://example.com",
-  );
+  expect(response.headers.get("Access-Control-Allow-Origin")).toBe("*");
   expect(response.headers.get("Access-Control-Allow-Headers")).toBe(
     "Content-Type, Authorization, Accept, Mcp-Session-Id, Mcp-Protocol-Version, Last-Event-Id, Mcp-Method, Mcp-Name",
   );
-  expect(response.headers.get("Access-Control-Allow-Credentials")).toBe("true");
+  // The default `credentials: true` is deliberately not emitted alongside the
+  // wildcard - see the dedicated test below.
+  expect(response.headers.get("Access-Control-Allow-Credentials")).toBeNull();
 
   await httpServer.close();
 });
 
-it("never combines wildcard origin with credentials: true (Fetch Standard forbids it)", async () => {
+it("never combines wildcard origin with credentials (Fetch Standard forbids it)", async () => {
   const port = await getRandomPort();
 
   const httpServer = await startHTTPServer({
@@ -2394,18 +2390,58 @@ it("never combines wildcard origin with credentials: true (Fetch Standard forbid
 
   expect(response.status).toBe(204);
 
-  const allowOrigin = response.headers.get("Access-Control-Allow-Origin");
-  const allowCredentials = response.headers.get(
-    "Access-Control-Allow-Credentials",
-  );
-
   // https://fetch.spec.whatwg.org/#http-access-control-allow-credentials -
   // a browser rejects the whole CORS response if these two ever appear
-  // together, silently failing any credentialed request.
-  if (allowCredentials === "true") {
-    expect(allowOrigin).not.toBe("*");
-    expect(allowOrigin).toBe("https://example.com");
-  }
+  // together, silently failing every credentialed request. The wildcard stays
+  // and the credentials header drops, rather than the reverse: reflecting the
+  // request origin back would hand any origin a working credentialed grant.
+  expect(response.headers.get("Access-Control-Allow-Origin")).toBe("*");
+  expect(response.headers.get("Access-Control-Allow-Credentials")).toBeNull();
+  expect(response.headers.get("Vary")).toBe("Origin");
+
+  await httpServer.close();
+});
+
+it("still sends credentials when an explicit origin allow-list matches", async () => {
+  const port = await getRandomPort();
+
+  const httpServer = await startHTTPServer({
+    cors: { credentials: true, origin: ["https://app.example"] },
+    createServer: async () => {
+      const mcpServer = new Server(
+        { name: "test", version: "1.0.0" },
+        { capabilities: {} },
+      );
+      return mcpServer;
+    },
+    port,
+  });
+
+  const allowed = await fetch(`http://localhost:${port}/mcp`, {
+    headers: {
+      "Access-Control-Request-Method": "POST",
+      Origin: "https://app.example",
+    },
+    method: "OPTIONS",
+  });
+
+  expect(allowed.headers.get("Access-Control-Allow-Origin")).toBe(
+    "https://app.example",
+  );
+  expect(allowed.headers.get("Access-Control-Allow-Credentials")).toBe("true");
+
+  // A rejected origin still varies by `Origin`, so a shared cache cannot serve
+  // this answer to the allowed one.
+  const rejected = await fetch(`http://localhost:${port}/mcp`, {
+    headers: {
+      "Access-Control-Request-Method": "POST",
+      Origin: "https://evil.example",
+    },
+    method: "OPTIONS",
+  });
+
+  expect(rejected.headers.get("Access-Control-Allow-Origin")).toBeNull();
+  expect(rejected.headers.get("Vary")).toBe("Origin");
 
   await httpServer.close();
 });

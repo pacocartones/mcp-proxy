@@ -615,25 +615,26 @@ const applyCorsHeaders = (
       }
     }
 
-    // A wildcard `Access-Control-Allow-Origin` combined with
-    // `Access-Control-Allow-Credentials: true` is forbidden by the Fetch
-    // Standard (https://fetch.spec.whatwg.org/#http-access-control-allow-credentials)
-    // - a browser rejects the whole CORS response for any credentialed
-    // request, silently, before it ever reaches the MCP handler. Reflecting
-    // the actual request `Origin` instead of the literal `"*"` is the
-    // standard workaround (see the `cors` npm package), and is safe here
-    // because it only changes the value emitted, not which origins pass.
-    if (allowedOrigin === "*" && finalCorsOptions.credentials === true) {
-      allowedOrigin = origin.origin;
-    }
+    // An array or function origin resolves per request, so the response is
+    // origin-dependent whether or not this one was allowed - a shared cache
+    // that missed that would hand one origin's answer to another.
+    res.setHeader("Vary", "Origin");
 
     if (allowedOrigin !== "false") {
       res.setHeader("Access-Control-Allow-Origin", allowedOrigin);
-      res.setHeader("Vary", "Origin");
     }
 
     // Handle credentials
-    if (finalCorsOptions.credentials !== undefined) {
+    // The Fetch Standard forbids pairing `Access-Control-Allow-Credentials`
+    // with a wildcard origin
+    // (https://fetch.spec.whatwg.org/#http-access-control-allow-credentials):
+    // a browser rejects the entire CORS response when it sees both, so the
+    // header grants nothing and only breaks callers that would otherwise be
+    // fine. Reflecting the request origin instead would "fix" it by handing
+    // every origin a working credentialed grant, which is not something a
+    // wildcard default should imply - configure an explicit `origin` to use
+    // credentials.
+    if (finalCorsOptions.credentials !== undefined && allowedOrigin !== "*") {
       res.setHeader(
         "Access-Control-Allow-Credentials",
         finalCorsOptions.credentials.toString(),
